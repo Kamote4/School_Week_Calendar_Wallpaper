@@ -171,3 +171,33 @@ run_wallpaper.bat
 - **Coordinate calculations are critical**: All measurements scale with `WIDTH / 1920.0`
 - **Windows API calls are brittle**: System parameters IDs (e.g., `20` for wallpaper) are fixed; verify before changes
 - **Date validation is lenient**: Invalid weeks are skipped; consider adding stricter validation if needed
+
+---
+
+## Recent Changes (April 2026)
+
+- **Month mode**: Added a `Month` view (default) that renders a full month on the right column. The month view is Sunday-first (Sun→Sat) and displays up to 6 calendar rows.
+- **Highlighted week & today**: The week that contains today's date is visually emphasized — the whole week rows receive extra vertical padding and their dates use a bolder font. Today's date is rendered larger and bolder than other days.
+- **Right-column overflow handling**: Long right-column content is wrapped and clipped to avoid drawing off-canvas. Options to change this behavior include auto-shrinking the font or adding a "...more" overflow indicator.
+- **Resolution & scaling**: The renderer detects the virtual screen size using the Windows API. Current generation uses a moderate horizontal upscale and additional vertical padding so wallpaper images have extra vertical room for right-column content. See `wallpaper_generator.py` for exact scale factors and `extra_height` values if you need to tune them.
+
+## Notes for Contributors
+
+- If you change rendering scale factors, update this file to document the new defaults and rationale.
+- The GUI now exposes a `Month` mode in `gui.py`. Mode selection is persisted in the `config.json` if you add that persistence later (currently only the schedule content is saved).
+- When altering right-column behavior, consider adding a GUI preview scrollbar or an option to auto-resize right-column fonts so users with small displays get a readable result.
+
+## Quick Tests
+
+Run these to validate changes locally:
+
+```bash
+python gui.py        # interactive preview + save
+python update_wallpaper.py   # headless generation -> wallpaper.png
+# Inspect the generated image: wallpaper.png
+```
+
+## Suggested Commit Message
+
+"Add Month view (Sunday-first), highlighted-week styling, right-column overflow handling, and GUI Month mode"
+

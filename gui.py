@@ -43,7 +43,7 @@ class WallpaperApp:
         mode_frame = ttk.LabelFrame(left_frame, text="Mode")
         mode_frame.pack(padx=10, pady=10, fill="x")
 
-        self.mode = tk.StringVar(value="schedule")
+        self.mode = tk.StringVar(value="month")
 
         schedule_rb = ttk.Radiobutton(
             mode_frame,
@@ -63,6 +63,15 @@ class WallpaperApp:
         )
         custom_rb.pack(anchor="w", padx=10, pady=5)
 
+        month_rb = ttk.Radiobutton(
+            mode_frame,
+            text="Month",
+            variable=self.mode,
+            value="month",
+            command=self.switch_mode,
+        )
+        month_rb.pack(anchor="w", padx=10, pady=5)
+
         # --- Frames for different modes ---
         self.schedule_frame = ttk.Frame(left_frame)
         self.custom_frame = ttk.Frame(left_frame)
@@ -79,7 +88,10 @@ class WallpaperApp:
 
         weeks_desc = ttk.Label(
             self.schedule_frame,
-            text="Each date represents the Monday (start) of that week.",
+            text=(
+                "Each date represents the Monday (start) of that week. "
+                "(Right preview shows a full month view starting Sunday.)"
+            ),
         )
         weeks_desc.pack(padx=10, pady=(0, 5), anchor="w")
 
@@ -212,16 +224,14 @@ class WallpaperApp:
         self.switch_mode()
 
     def switch_mode(self):
-        if self.mode.get() == "schedule":
+        if self.mode.get() in ("schedule", "month"):
             self.custom_frame.pack_forget()
             self.schedule_frame.pack(padx=10, pady=10, fill="x")
-            self.right_col_frame.pack(
-                padx=10, pady=10, fill="x"
-            )  # Ensure this is packed
+            self.right_col_frame.pack(padx=10, pady=10, fill="x")
             self.save_button.pack(side="left", padx=5)
         else:
             self.schedule_frame.pack_forget()
-            self.right_col_frame.pack_forget()  # Ensure this is hidden
+            self.right_col_frame.pack_forget()
             self.custom_frame.pack(padx=10, pady=10, fill="x")
             self.save_button.pack_forget()
 
@@ -229,7 +239,7 @@ class WallpaperApp:
         """Generates and returns the wallpaper image without setting it."""
         mode = self.mode.get()
         img = None
-        if mode == "schedule":
+        if mode in ("schedule", "month"):
             title = self.title_entry.get()
             weeks_data_str = self.weeks_text.get("1.0", tk.END).strip()
             weeks_data = []

@@ -30,11 +30,14 @@ class WallpaperGenerator:
         else:
             self.WIDTH, self.HEIGHT = primary_width, primary_height
 
-        scale_factor = 1.5
-        self.WIDTH = int(self.WIDTH * scale_factor)
-        self.HEIGHT = int(self.HEIGHT * scale_factor)
-        extra_height = 400
-        self.HEIGHT = self.HEIGHT + extra_height
+        # Increase vertical space: scale width moderately but scale height more
+        # and add extra padding so right-column content has room.
+        scale_factor_width = 1.5
+        scale_factor_height = 1.9
+        extra_height = 800
+
+        self.WIDTH = int(self.WIDTH * scale_factor_width)
+        self.HEIGHT = int(self.HEIGHT * scale_factor_height) + extra_height
 
     def load_fonts(self):
         base = self.WIDTH / 1920.0
@@ -154,59 +157,108 @@ class WallpaperGenerator:
             draw.text((left_x, wy), left_text, fill=color, font=font)
             wy += line_h
 
-        if current_week_index is not None:
-            wk_label, wk_start = weeks_data[current_week_index]
-            month_label = MONTH_ABBR[wk_start.month]
-            m_w, m_h = self._text_size(draw, month_label, self.DATE_BOLD_FONT)
-            mx = right_x + (right_col_w - m_w) // 2
+        # --- Right Column: Month view (Sunday-first) ---
+        # Render the full month containing "now", with weeks as rows.
+        month_label = f"{MONTH_ABBR[now.month]} {now.year}"
+        m_w, m_h = self._text_size(draw, month_label, self.DATE_BOLD_FONT)
+        mx = right_x + (right_col_w - m_w) // 2
+        draw.text(
+            (mx, right_y),
+            month_label,
+            fill=WEEK_HIGHLIGHT_COLOR,
+            font=self.DATE_BOLD_FONT,
+        )
+
+        # Weekday headers: Sunday first
+        weekdays = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
+        col_padding = int(0.02 * self.WIDTH)
+        usable_w = right_col_w - 2 * col_padding
+        cell_w = usable_w // 7
+
+        wy_top = right_y + m_h + int(0.02 * self.HEIGHT)
+        header_th = 0
+        for idx, wd in enumerate(weekdays):
+            tx = right_x + col_padding + idx * cell_w
+            twd, thd = self._text_size(draw, wd, self.DATE_BOLD_FONT)
             draw.text(
-                (mx, right_y),
-                month_label,
-                fill=WEEK_HIGHLIGHT_COLOR,
+                (tx + (cell_w - twd) // 2, wy_top),
+                wd,
+                fill=DEFAULT_TEXT_COLOR,
                 font=self.DATE_BOLD_FONT,
             )
+            header_th = max(header_th, thd)
 
-            weekdays = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
-            col_padding = int(0.02 * self.WIDTH)
-            usable_w = right_col_w - 2 * col_padding
-            cell_w = usable_w // 7
+        # Calculate first calendar cell (the Sunday on or before the 1st of the month)
+        first_of_month = datetime(now.year, now.month, 1)
+        days_to_subtract = (first_of_month.weekday() + 1) % 7
+        first_cell = first_of_month - timedelta(days=days_to_subtract)
 
-            wy_top = right_y + m_h + int(0.02 * self.HEIGHT)
-            for idx, wd in enumerate(weekdays):
-                tx = right_x + col_padding + idx * cell_w
-                twd, thd = self._text_size(draw, wd, self.DATE_BOLD_FONT)
-                draw.text(
-                    (tx + (cell_w - twd) // 2, wy_top),
-                    wd,
-                    fill=DEFAULT_TEXT_COLOR,
-                    font=self.DATE_BOLD_FONT,
-                )
+        # Build calendar rows (max 6 weeks to cover all months)
+        num_rows = 6
+        row_h = int(header_th * 1.8)
+        cal_top = wy_top + int(header_th * 1.6)
 
-            num_y = wy_top + int(thd * 1.6)
-            for d in range(7):
-                dt = wk_start + timedelta(days=d)
+        # Build per-row height to add extra padding for the highlighted week
+        highlighted_week_row = None
+        row_is_highlight_vals = []
+        for row in range(num_rows):
+            if (
+                first_cell + timedelta(days=row * 7)
+                <= now
+                <= first_cell + timedelta(days=row * 7 + 6)
+            ):
+                row_is_highlight_vals.append(True)
+                highlighted_week_row = row
+            else:
+                row_is_highlight_vals.append(False)
+
+        extra_padding = max(8, int(row_h * 0.5))
+        row_heights = [
+            row_h + (extra_padding if is_hl else 0) for is_hl in row_is_highlight_vals
+        ]
+
+        # Compute y position for each row
+        row_positions = []
+        y_cursor = cal_top
+        for h in row_heights:
+            row_positions.append(y_cursor)
+            y_cursor += h
+
+        # Draw each day, centering vertically within its row height
+        thd2 = header_th
+        for row in range(num_rows):
+            for col in range(7):
+                dt = first_cell + timedelta(days=row * 7 + col)
+                tx = right_x + col_padding + col * cell_w
                 day_str = str(dt.day)
-                tx = right_x + col_padding + d * cell_w
+
+                in_current_month = dt.month == now.month
+                row_is_highlight = row_is_highlight_vals[row]
+
+                # Choose font and color
                 if dt.date() == now.date():
                     fnt = self.TODAY_FONT
-                    col = TODAY_COLOR
+                    col_fill = TODAY_COLOR
+                elif row_is_highlight:
+                    fnt = self.DATE_BOLD_FONT
+                    col_fill = (
+                        WEEK_HIGHLIGHT_COLOR if in_current_month else (150, 150, 150)
+                    )
                 else:
                     fnt = self.DATE_FONT
-                    col = WEEK_HIGHLIGHT_COLOR
-                twd, thd2 = self._text_size(draw, day_str, fnt)
+                    col_fill = (
+                        WEEK_HIGHLIGHT_COLOR if in_current_month else (120, 120, 120)
+                    )
+
+                twd, thd = self._text_size(draw, day_str, fnt)
+                # center vertically within the row
+                cell_y = row_positions[row] + (row_heights[row] - thd) // 2
                 draw.text(
-                    (tx + (cell_w - twd) // 2, num_y), day_str, fill=col, font=fnt
+                    (tx + (cell_w - twd) // 2, cell_y), day_str, fill=col_fill, font=fnt
                 )
-        else:
-            note = (
-                "Classes have not started yet"
-                if now.date() < weeks_data[0][1].date()
-                else "Term finished"
-            )
-            nw, nh = self._text_size(draw, note, self.DATE_BOLD_FONT)
-            nx = right_x + (right_col_w - nw) // 2
-            ny = right_y + int(0.15 * self.HEIGHT)
-            draw.text((nx, ny), note, fill=DEFAULT_TEXT_COLOR, font=self.DATE_BOLD_FONT)
+                thd2 = thd
+
+        num_y = row_positions[-1] + row_heights[-1]
 
         # --- Right Column: Checklist or Custom Text ---
         if right_col_content and "thd2" in locals():
@@ -217,9 +269,15 @@ class WallpaperGenerator:
                 40 * base
             )  # 20 base for box, 20 for padding
 
+            # Determine bottom limit for right column content so we don't draw off-canvas
+            bottom_limit = right_y + (self.HEIGHT - right_y) - int(0.02 * self.HEIGHT)
+
             original_lines = right_col_content.split("\n")
 
+            stop_drawing = False
             for line in original_lines:
+                if stop_drawing:
+                    break
                 wrapped_lines = self._wrap_text(
                     draw, line, self.CUSTOM_TEXT_FONT, max_text_width
                 )
@@ -231,16 +289,23 @@ class WallpaperGenerator:
                         int(30 * base) if right_col_mode == "checklist" and i > 0 else 0
                     )
 
+                    _, line_h_content = self._text_size(
+                        draw, "Ay", self.CUSTOM_TEXT_FONT
+                    )
+                    line_height = int(line_h_content * 1.6)
+
+                    # If drawing this line would exceed the bottom limit, stop to avoid invisible overflow
+                    if content_y + line_height > bottom_limit:
+                        stop_drawing = True
+                        break
+
                     draw.text(
                         (right_x + indent, content_y),
                         wrapped_line,
                         fill=DEFAULT_TEXT_COLOR,
                         font=self.CUSTOM_TEXT_FONT,
                     )
-                    _, line_h_content = self._text_size(
-                        draw, "Ay", self.CUSTOM_TEXT_FONT
-                    )
-                    content_y += int(line_h_content * 1.6)
+                    content_y += line_height
 
         if set_wallpaper:
             self.save_and_set_wallpaper(img)
