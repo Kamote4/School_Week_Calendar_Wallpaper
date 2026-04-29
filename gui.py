@@ -1,3 +1,30 @@
+"""
+Dynamic Wallpaper Generator - GUI Application
+
+USAGE INSTRUCTIONS:
+1. Select a mode:
+   - Schedule/Month: Display a calendar with week labels and optional right-column content
+   - Custom: Display custom text centered on the wallpaper
+
+2. For Schedule/Month mode:
+   - Enter a title (e.g., "1st Term '25 - '26")
+   - Enter weeks in format: "Label, YYYY-MM-DD" (one per line)
+     The date represents Monday (start) of that week
+   - Select right-column content mode (Checklist or Custom Text)
+   - Enter content for the right column (optional)
+   - Click "Update Preview" to see live preview
+   - Click "Save Schedule" to save configuration to config.json
+   - Click "Generate and Set" to apply wallpaper immediately
+
+3. For Custom mode:
+   - Enter any text to display
+   - Adjust font size, horizontal/vertical alignment
+   - Click "Update Preview" to see live preview
+   - Click "Generate and Set" to apply wallpaper immediately
+
+NOTE: Default values are provided if fields are left empty.
+"""
+
 import tkinter as tk
 from tkinter import ttk, messagebox
 from wallpaper_generator import WallpaperGenerator
@@ -252,17 +279,35 @@ class WallpaperApp:
                     except ValueError:
                         print(f"Skipping invalid line: {line}")
 
-            if title and weeks_data:
-                right_col_content = self.right_col_text.get("1.0", tk.END).strip()
-                img = self.generator.generate_schedule_wallpaper(
-                    title,
-                    weeks_data,
-                    right_col_mode=self.right_col_mode.get(),
-                    right_col_content=right_col_content,
-                    set_wallpaper=set_wallpaper,
-                )
-            else:
-                print("Title or weeks data is empty. Nothing to generate.")
+            # Use defaults if title or weeks are empty
+            if not title:
+                title = "1st Term '25 - '26"
+            if not weeks_data:
+                weeks_data = [
+                    ("Week 1", datetime(2025, 8, 11)),
+                    ("Week 2", datetime(2025, 8, 18)),
+                    ("Week 3", datetime(2025, 8, 25)),
+                    ("Week 4", datetime(2025, 9, 1)),
+                    ("Week 5", datetime(2025, 9, 8)),
+                    ("Week 6", datetime(2025, 9, 15)),
+                    ("Week 7", datetime(2025, 9, 22)),
+                    ("Week 8", datetime(2025, 9, 29)),
+                    ("Week 9", datetime(2025, 10, 6)),
+                    ("Week 10", datetime(2025, 10, 13)),
+                    ("Week 11", datetime(2025, 10, 20)),
+                    ("Week 12", datetime(2025, 10, 27)),
+                    ("Week 13", datetime(2025, 11, 3)),
+                    ("Week 14", datetime(2025, 11, 10)),
+                ]
+
+            right_col_content = self.right_col_text.get("1.0", tk.END).strip()
+            img = self.generator.generate_schedule_wallpaper(
+                title,
+                weeks_data,
+                right_col_mode=self.right_col_mode.get(),
+                right_col_content=right_col_content,
+                set_wallpaper=set_wallpaper,
+            )
         else:
             custom_text = self.custom_text.get("1.0", tk.END).strip()
             if custom_text:
