@@ -25,9 +25,9 @@ def main():
         print("Invalid config: missing title.")
         return
 
-    left_pane_mode   = cfg.get("left_pane_mode", "per_week")
-    left_col_content = cfg.get("left_col_content", "")
-    right_pane_mode  = cfg.get("right_pane_mode", "calendar")
+    left_pane_mode    = cfg.get("left_pane_mode", "per_week")
+    left_col_content  = cfg.get("left_col_content", "")
+    right_pane_mode   = cfg.get("right_pane_mode", "calendar")
     right_col_content = cfg.get("right_col_content", "")
 
     # migrate old format
@@ -36,6 +36,12 @@ def main():
     if not bottom_content and "right_col_content" in cfg and "bottom_content" not in cfg:
         bottom_content = cfg.get("right_col_content", "")
 
+    # migrate "checklist" → "todo"
+    if left_pane_mode == "checklist":
+        left_pane_mode = "todo"
+    if bottom_mode == "checklist":
+        bottom_mode = "todo"
+
     weeks_data = []
     if left_pane_mode == "per_week":
         for line in cfg.get("weeks", "").strip().split("\n"):
@@ -43,22 +49,32 @@ def main():
                 parts = line.split(",", 1)
                 if len(parts) == 2:
                     try:
-                        label = parts[0].strip()
-                        date  = datetime.strptime(parts[1].strip(), "%Y-%m-%d")
-                        weeks_data.append((label, date))
+                        weeks_data.append((parts[0].strip(), datetime.strptime(parts[1].strip(), "%Y-%m-%d")))
                     except ValueError:
                         print(f"Skipping bad week line: {line}")
 
+    todo_items = []
+    for line in cfg.get("todo_items", "").strip().split("\n"):
+        if line:
+            parts = line.rsplit(",", 2)
+            if len(parts) == 3:
+                try:
+                    due = datetime.strptime(parts[1].strip(), "%Y-%m-%d")
+                    todo_items.append((parts[0].strip(), due, parts[2].strip()))
+                except ValueError:
+                    print(f"Skipping bad todo line: {line}")
+
     gen = WallpaperGenerator()
     gen.generate_schedule_wallpaper(
-        title            = title,
-        weeks_data       = weeks_data,
-        left_pane_mode   = left_pane_mode,
-        left_col_content = left_col_content,
-        right_pane_mode  = right_pane_mode,
+        title             = title,
+        weeks_data        = weeks_data,
+        left_pane_mode    = left_pane_mode,
+        left_col_content  = left_col_content,
+        right_pane_mode   = right_pane_mode,
         right_col_content = right_col_content,
-        bottom_mode      = bottom_mode,
-        bottom_content   = bottom_content,
+        bottom_mode       = bottom_mode,
+        bottom_content    = bottom_content,
+        todo_items        = todo_items,
     )
     print("Wallpaper updated successfully.")
 

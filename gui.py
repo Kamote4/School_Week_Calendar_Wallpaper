@@ -2,7 +2,7 @@ import json
 import os
 import re
 import tkinter as tk
-from tkinter import ttk, messagebox
+from tkinter import ttk, messagebox, colorchooser
 from datetime import datetime, timedelta
 from datetime import date as Date
 import calendar as cal_mod
@@ -11,10 +11,20 @@ from wallpaper_generator import WallpaperGenerator
 
 SCRIPT_DIR  = os.path.dirname(os.path.abspath(__file__))
 CONFIG_PATH = os.path.join(SCRIPT_DIR, "config.json")
+DEFAULT_TODO_COLOR = "#4ade80"
 
 
 def monday_of(d):
     return d - timedelta(days=d.weekday())
+
+
+def days_left_str(due: Date) -> str:
+    delta = (due - Date.today()).days
+    if delta > 0:
+        return f"{delta}d left"
+    if delta == 0:
+        return "Today"
+    return f"{abs(delta)}d ago"
 
 
 def load_config():
@@ -27,13 +37,19 @@ def load_config():
         "right_col_content": "",
         "bottom_mode": "none",
         "bottom_content": "",
+        "todo_items": "",
     }
     if os.path.exists(CONFIG_PATH):
         with open(CONFIG_PATH, "r") as f:
             data = json.load(f)
+        # migrate old format
         if "right_col_mode" in data and "bottom_mode" not in data:
             data["bottom_mode"]    = data.pop("right_col_mode", "none")
             data["bottom_content"] = data.pop("right_col_content", "")
+        # migrate "checklist" → "todo"
+        for key in ("left_pane_mode", "bottom_mode"):
+            if data.get(key) == "checklist":
+                data[key] = "todo"
         defaults.update(data)
     return defaults
 
@@ -43,21 +59,22 @@ def save_config(data):
         json.dump(data, f, indent=4)
 
 
-# ── Monday picker ─────────────────────────────────────────────────────────────
+# ── Calendar picker (Monday-only or any day) ──────────────────────────────────
 
-class MondayPicker(tk.Toplevel):
-    def __init__(self, parent, initial=None, callback=None):
+class CalendarPicker(tk.Toplevel):
+    def __init__(self, parent, initial=None, callback=None, mondays_only=False):
         super().__init__(parent)
-        self.title("Pick a Monday")
+        self.mondays_only = mondays_only
+        self.title("Pick a Monday" if mondays_only else "Pick a Date")
         self.resizable(False, False)
         self.grab_set()
         self.callback = callback
 
         if initial is None:
-            initial = monday_of(Date.today())
+            initial = monday_of(Date.today()) if mondays_only else Date.today()
         if isinstance(initial, datetime):
             initial = initial.date()
-        if initial.weekday() != 0:
+        if mondays_only and initial.weekday() != 0:
             initial = monday_of(initial)
 
         self.selected      = initial
@@ -76,7 +93,7 @@ class MondayPicker(tk.Toplevel):
         self.grid_f = tk.Frame(self, padx=10)
         self.grid_f.pack()
         for c, d in enumerate(["Mon","Tue","Wed","Thu","Fri","Sat","Sun"]):
-            fg = "#1e40af" if c == 0 else "#888"
+            fg = "#1e40af" if (c == 0 and self.mondays_only) else "#555"
             tk.Label(self.grid_f, text=d, width=4, font=("Arial", 9, "bold"), fg=fg).grid(row=0, column=c, pady=(0, 4))
 
         tk.Button(self, text="Select", width=12, command=self._confirm).pack(pady=8)
@@ -89,23 +106,30 @@ class MondayPicker(tk.Toplevel):
 
         y, m  = self.current_month.year, self.current_month.month
         first = Date(y, m, 1)
-        start_col = first.weekday()
         days  = cal_mod.monthrange(y, m)[1]
 
-        row, col = 1, start_col
+        row, col = 1, first.weekday()
         for n in range(1, days + 1):
-            d   = Date(y, m, n)
-            mon = d.weekday() == 0
-            sel = d == self.selected
-            bg  = "#2563eb" if sel else ("#dbeafe" if mon else "#f3f4f6")
-            fg  = "white"   if sel else ("#1e40af" if mon else "#bbb")
-            btn = tk.Button(
+            d       = Date(y, m, n)
+            is_mon  = d.weekday() == 0
+            enabled = (not self.mondays_only) or is_mon
+            sel     = d == self.selected
+
+            if sel:
+                bg, fg = "#2563eb", "white"
+            elif self.mondays_only and is_mon:
+                bg, fg = "#dbeafe", "#1e40af"
+            elif enabled:
+                bg, fg = "#f0fdf4", "#166534"
+            else:
+                bg, fg = "#f3f4f6", "#bbb"
+
+            tk.Button(
                 self.grid_f, text=str(n), width=3,
                 bg=bg, fg=fg, relief="flat", bd=0,
-                state="normal" if mon else "disabled",
+                state="normal" if enabled else "disabled",
                 command=lambda d=d: self._pick(d),
-            )
-            btn.grid(row=row, column=col, padx=1, pady=1, ipady=3)
+            ).grid(row=row, column=col, padx=1, pady=1, ipady=3)
             col += 1
             if col > 6:
                 col = 0
@@ -133,6 +157,117 @@ class MondayPicker(tk.Toplevel):
         self.destroy()
 
 
+# ── Pastel color picker ───────────────────────────────────────────────────────
+
+class PastelPicker(tk.Toplevel):
+    # Light colors that are all clearly visible on a black background
+    COLORS = [
+        "#ff8080", "#ff9999", "#ffb3ba", "#ffc0cb",  # reds / pinks
+        "#ffb347", "#ffcc80", "#ffd966", "#fff07c",  # oranges / yellows
+        "#90ee90", "#98e6a0", "#a8d8a8", "#b5e6b5",  # greens
+        "#7fffd4", "#80ded9", "#87ceeb", "#aee1e1",  # teals / cyans
+        "#87cefa", "#9eb8e8", "#add8e6", "#b0c4de",  # blues
+        "#da70d6", "#c8a0e0", "#d8b4fe", "#e0c8ff",  # purples / lavender
+        "#ffe8a1", "#ffd6a5", "#f4c2c2", "#f5cba7",  # warm pastels
+        "#d4edda", "#dce8f5", "#e8e0f0", "#ffffff",  # light neutrals
+    ]
+
+    def __init__(self, parent, current=None, callback=None):
+        super().__init__(parent)
+        self.title("Pick Color")
+        self.resizable(False, False)
+        self.grab_set()
+        self.callback = callback
+        self._current = current or self.COLORS[0]
+        self._build()
+
+    def _build(self):
+        tk.Label(self, text="Pick a task color:", font=("Arial", 10, "bold")).pack(pady=(10, 4))
+
+        grid = tk.Frame(self, padx=10, pady=4)
+        grid.pack()
+        cols = 8
+        for i, color in enumerate(self.COLORS):
+            row, col = divmod(i, cols)
+            is_sel = color.lower() == self._current.lower()
+            btn = tk.Button(
+                grid, bg=color, width=3, height=1,
+                relief="solid" if is_sel else "flat",
+                bd=3 if is_sel else 1,
+                highlightbackground="#000" if is_sel else "#ccc",
+                command=lambda c=color: self._pick(c),
+            )
+            btn.grid(row=row, column=col, padx=2, pady=2)
+
+        tk.Button(self, text="Custom color…", command=self._custom_color).pack(pady=(2, 0))
+        tk.Button(self, text="Cancel", command=self.destroy).pack(pady=(4, 10))
+
+    def _custom_color(self):
+        result = colorchooser.askcolor(color=self._current, title="Custom Color", parent=self)
+        if result and result[1]:
+            self._pick(result[1])
+
+    def _pick(self, color):
+        if self.callback:
+            self.callback(color)
+        self.destroy()
+
+
+# ── To Do item dialog (add / edit) ────────────────────────────────────────────
+
+class TodoDialog(tk.Toplevel):
+    def __init__(self, parent, initial=None, callback=None):
+        super().__init__(parent)
+        self.title("Edit Task" if initial else "Add Task")
+        self.resizable(False, False)
+        self.grab_set()
+        self.callback = callback
+
+        self._date  = initial[1] if initial else Date.today()
+        self._color = initial[2] if initial else DEFAULT_TODO_COLOR
+
+        pad = {"padx": 10, "pady": 5}
+
+        tk.Label(self, text="Label:", anchor="w").grid(row=0, column=0, sticky="w", **pad)
+        self._label_var = tk.StringVar(value=initial[0] if initial else "")
+        tk.Entry(self, textvariable=self._label_var, width=28).grid(row=0, column=1, columnspan=2, sticky="ew", **pad)
+
+        tk.Label(self, text="Due date:", anchor="w").grid(row=1, column=0, sticky="w", **pad)
+        self._date_btn = tk.Button(self, text=str(self._date), width=14, command=self._pick_date)
+        self._date_btn.grid(row=1, column=1, sticky="w", **pad)
+
+        tk.Label(self, text="Color:", anchor="w").grid(row=2, column=0, sticky="w", **pad)
+        self._color_btn = tk.Button(self, width=6, bg=self._color, command=self._pick_color)
+        self._color_btn.grid(row=2, column=1, sticky="w", **pad)
+
+        btns = tk.Frame(self)
+        btns.grid(row=3, column=0, columnspan=3, pady=(8, 6))
+        tk.Button(btns, text="OK",     width=10, command=self._ok).pack(side="left", padx=6)
+        tk.Button(btns, text="Cancel", width=10, command=self.destroy).pack(side="left", padx=6)
+
+    def _pick_date(self):
+        CalendarPicker(self, initial=self._date, callback=self._on_date, mondays_only=False)
+
+    def _on_date(self, d):
+        self._date = d
+        self._date_btn.config(text=str(d))
+
+    def _pick_color(self):
+        def on_picked(c):
+            self._color = c
+            self._color_btn.config(bg=c)
+        PastelPicker(self, current=self._color, callback=on_picked)
+
+    def _ok(self):
+        label = self._label_var.get().strip()
+        if not label:
+            messagebox.showwarning("Missing", "Enter a task label.", parent=self)
+            return
+        if self.callback:
+            self.callback((label, self._date, self._color))
+        self.destroy()
+
+
 # ── Main app ──────────────────────────────────────────────────────────────────
 
 class App(tk.Tk):
@@ -148,11 +283,11 @@ class App(tk.Tk):
     # ── UI construction ───────────────────────────────────────────────────────
 
     def _build_ui(self):
-        self.columnconfigure(0, weight=2)   # controls
-        self.columnconfigure(1, weight=3)   # preview
+        self.columnconfigure(0, weight=2)
+        self.columnconfigure(1, weight=3)
         self.rowconfigure(0, weight=1)
 
-        # ── Controls column ───────────────────────────────────────────────────
+        # Controls column
         ctrl = tk.Frame(self)
         ctrl.grid(row=0, column=0, sticky="nsew", padx=(6, 3), pady=6)
         ctrl.columnconfigure(0, weight=1)
@@ -166,12 +301,10 @@ class App(tk.Tk):
         self.title_var = tk.StringVar()
         tk.Entry(title_row, textvariable=self.title_var, font=("Arial", 10)).grid(row=0, column=1, sticky="ew")
 
-        # Vertical paned window — drag sash to resize panes vs bottom content
-        vpane = tk.PanedWindow(ctrl, orient="vertical", sashwidth=6, sashrelief="flat",
-                               sashpad=2, bg="#cccccc")
+        # Vertical paned window
+        vpane = tk.PanedWindow(ctrl, orient="vertical", sashwidth=6, sashrelief="flat", sashpad=2, bg="#cccccc")
         vpane.grid(row=1, column=0, sticky="nsew", pady=(4, 0))
 
-        # Top pane: left + right config panes
         panes = tk.Frame(vpane)
         panes.columnconfigure(0, weight=1)
         panes.columnconfigure(1, weight=1)
@@ -180,7 +313,6 @@ class App(tk.Tk):
         self._build_right_pane(panes)
         vpane.add(panes, stretch="always", minsize=180)
 
-        # Bottom pane: bottom content
         bot_outer = tk.Frame(vpane)
         bot_outer.columnconfigure(0, weight=1)
         bot_outer.rowconfigure(0, weight=1)
@@ -191,25 +323,23 @@ class App(tk.Tk):
         bm = tk.Frame(bot)
         bm.grid(row=0, column=0, sticky="w")
         self.bottom_mode_var = tk.StringVar(value="none")
-        for val, lbl in [("none","None"), ("checklist","Checklist"), ("custom","Custom")]:
+        for val, lbl in [("none","None"), ("todo","To Do"), ("custom","Custom")]:
             tk.Radiobutton(bm, text=lbl, variable=self.bottom_mode_var, value=val,
                            command=self._on_bottom_mode).pack(side="left", padx=4)
         self.bottom_text = tk.Text(bot, state="disabled", bg="#f0f0f0", font=("Arial", 9))
         self.bottom_text.grid(row=1, column=0, sticky="nsew", pady=(3, 0))
         vpane.add(bot_outer, stretch="always", minsize=60)
 
-        # Buttons
         btns = tk.Frame(ctrl, pady=8)
         btns.grid(row=2, column=0)
         tk.Button(btns, text="Preview Wallpaper", width=20, command=self._preview).pack(side="left", padx=6)
         tk.Button(btns, text="Save & Apply",      width=20, command=self._save_apply).pack(side="left", padx=6)
 
-        # ── Preview column ────────────────────────────────────────────────────
+        # Preview column
         prev_frame = tk.LabelFrame(self, text="Preview", font=("Arial", 10, "bold"), padx=4, pady=4)
         prev_frame.grid(row=0, column=1, sticky="nsew", padx=(3, 6), pady=6)
         prev_frame.columnconfigure(0, weight=1)
         prev_frame.rowconfigure(0, weight=1)
-
         self.preview_canvas = tk.Canvas(prev_frame, bg="#111111", highlightthickness=0)
         self.preview_canvas.grid(row=0, column=0, sticky="nsew")
 
@@ -232,7 +362,7 @@ class App(tk.Tk):
         lm = tk.Frame(lf)
         lm.grid(row=0, column=0, sticky="w", pady=(0, 4))
         self.left_mode_var = tk.StringVar(value="per_week")
-        for val, lbl in [("per_week","Per Week"), ("checklist","Checklist"), ("custom","Custom")]:
+        for val, lbl in [("per_week","Per Week"), ("todo","To Do"), ("custom","Custom")]:
             tk.Radiobutton(lm, text=lbl, variable=self.left_mode_var, value=val,
                            command=self._on_left_mode).pack(side="left", padx=3)
 
@@ -242,6 +372,7 @@ class App(tk.Tk):
         self.left_content.rowconfigure(0, weight=1)
 
         self._build_per_week_frame()
+        self._build_todo_frame()
         self._build_left_text_frame()
 
     def _build_per_week_frame(self):
@@ -250,27 +381,61 @@ class App(tk.Tk):
         f.rowconfigure(0, weight=1)
         self.per_week_frame = f
 
-        tree_wrap = tk.Frame(f)
-        tree_wrap.grid(row=0, column=0, sticky="nsew")
-        tree_wrap.columnconfigure(0, weight=1)
-        tree_wrap.rowconfigure(0, weight=1)
+        tw = tk.Frame(f)
+        tw.grid(row=0, column=0, sticky="nsew")
+        tw.columnconfigure(0, weight=1)
+        tw.rowconfigure(0, weight=1)
 
-        self.tree = ttk.Treeview(tree_wrap, columns=("Label","Start Date"), show="headings", height=8)
+        self.tree = ttk.Treeview(tw, columns=("Label","Start Date"), show="headings", height=8)
         self.tree.heading("Label",      text="Label")
         self.tree.heading("Start Date", text="Start (Mon)")
         self.tree.column("Label",      width=90)
         self.tree.column("Start Date", width=110)
         self.tree.grid(row=0, column=0, sticky="nsew")
-        sb = ttk.Scrollbar(tree_wrap, orient="vertical", command=self.tree.yview)
+        sb = ttk.Scrollbar(tw, orient="vertical", command=self.tree.yview)
         self.tree.configure(yscrollcommand=sb.set)
         sb.grid(row=0, column=1, sticky="ns")
-        self.tree.bind("<Double-1>", self._on_tree_double_click)
+        self.tree.bind("<Double-1>", self._on_week_double_click)
 
         ctrl = tk.Frame(f)
         ctrl.grid(row=1, column=0, sticky="ew", pady=(3, 0))
-        tk.Button(ctrl, text="+ Add",          command=self._add_week).pack(side="left", padx=2)
-        tk.Button(ctrl, text="− Remove",       command=self._remove_week).pack(side="left", padx=2)
-        tk.Button(ctrl, text="Pick Start…",    command=self._pick_start_date).pack(side="left", padx=2)
+        tk.Button(ctrl, text="+ Add",        command=self._add_week).pack(side="left", padx=2)
+        tk.Button(ctrl, text="− Remove",     command=self._remove_week).pack(side="left", padx=2)
+        tk.Button(ctrl, text="Pick Start…",  command=self._pick_start_date).pack(side="left", padx=2)
+        tk.Label(ctrl, text="dbl-click to edit", fg="#999", font=("Arial", 8)).pack(side="left", padx=4)
+
+    def _build_todo_frame(self):
+        f = tk.Frame(self.left_content)
+        f.columnconfigure(0, weight=1)
+        f.rowconfigure(0, weight=1)
+        self.todo_frame = f
+        self._color_photos = {}  # PhotoImage cache — prevents GC
+
+        # Column #0 shows color swatch image; "_raw_date" hidden for config
+        cols = ("label", "due_display", "days_left", "color", "_raw_date")
+        shown = ("label", "due_display", "days_left", "color")
+        self.todo_tree = ttk.Treeview(f, columns=cols, show="tree headings",
+                                       displaycolumns=shown, height=8)
+        self.todo_tree.column("#0",          width=44,  stretch=False, minwidth=44)
+        self.todo_tree.heading("#0",         text="")
+        self.todo_tree.heading("label",       text="Task")
+        self.todo_tree.heading("due_display", text="Due Date")
+        self.todo_tree.heading("days_left",   text="Days Left")
+        self.todo_tree.heading("color",       text="Color")
+        self.todo_tree.column("label",       width=130, stretch=True,  minwidth=80)
+        self.todo_tree.column("due_display", width=75,  stretch=False)
+        self.todo_tree.column("days_left",   width=65,  stretch=False)
+        self.todo_tree.column("color",       width=80,  stretch=False)
+        self.todo_tree.grid(row=0, column=0, sticky="nsew")
+        sb = ttk.Scrollbar(f, orient="vertical", command=self.todo_tree.yview)
+        self.todo_tree.configure(yscrollcommand=sb.set)
+        sb.grid(row=0, column=1, sticky="ns")
+        self.todo_tree.bind("<Double-1>", self._on_todo_double_click)
+
+        ctrl = tk.Frame(f)
+        ctrl.grid(row=1, column=0, sticky="ew", pady=(3, 0))
+        tk.Button(ctrl, text="+ Add Task", command=self._add_todo).pack(side="left", padx=2)
+        tk.Button(ctrl, text="− Remove",   command=self._remove_todo).pack(side="left", padx=2)
         tk.Label(ctrl, text="dbl-click to edit", fg="#999", font=("Arial", 8)).pack(side="left", padx=4)
 
     def _build_left_text_frame(self):
@@ -307,7 +472,7 @@ class App(tk.Tk):
         self.right_cal_frame.rowconfigure(0, weight=1)
         tk.Label(
             self.right_cal_frame,
-            text="Monthly calendar is\nauto-generated on the wallpaper.",
+            text="Monthly calendar is\nauto-generated on the wallpaper.\n\nTask due dates will\nappear in their chosen color.",
             fg="#666", font=("Arial", 9), justify="center",
         ).grid(row=0, column=0, pady=20)
 
@@ -323,13 +488,17 @@ class App(tk.Tk):
     # ── Mode switches ─────────────────────────────────────────────────────────
 
     def _on_left_mode(self):
-        if self.left_mode_var.get() == "per_week":
-            self.left_text_frame.grid_remove()
+        mode = self.left_mode_var.get()
+        self.per_week_frame.grid_remove()
+        self.todo_frame.grid_remove()
+        self.left_text_frame.grid_remove()
+        if mode == "per_week":
             self.per_week_frame.grid(row=0, column=0, sticky="nsew")
             if not self.tree.get_children():
                 self._auto_seed()
+        elif mode == "todo":
+            self.todo_frame.grid(row=0, column=0, sticky="nsew")
         else:
-            self.per_week_frame.grid_remove()
             self.left_text_frame.grid(row=0, column=0, sticky="nsew")
 
     def _on_right_mode(self):
@@ -354,8 +523,8 @@ class App(tk.Tk):
     def _add_week(self):
         children = self.tree.get_children()
         if children:
-            last      = self.tree.item(children[-1], "values")
-            m         = re.search(r'(\d+)$', last[0])
+            last = self.tree.item(children[-1], "values")
+            m    = re.search(r'(\d+)$', last[0])
             new_label = (last[0][:m.start()] + str(int(m.group(1)) + 1)) if m else last[0] + " 2"
             try:
                 new_date = datetime.strptime(last[1], "%Y-%m-%d").date() + timedelta(weeks=1)
@@ -387,9 +556,9 @@ class App(tk.Tk):
             else:
                 self.tree.insert("", "end", values=("Week 1", d.strftime("%Y-%m-%d")))
 
-        MondayPicker(self, initial=init, callback=on_picked)
+        CalendarPicker(self, initial=init, callback=on_picked, mondays_only=True)
 
-    def _on_tree_double_click(self, event):
+    def _on_week_double_click(self, event):
         item = self.tree.identify_row(event.y)
         col  = self.tree.identify_column(event.x)
         if not item or not col:
@@ -408,7 +577,7 @@ class App(tk.Tk):
                 v[1] = d.strftime("%Y-%m-%d")
                 self.tree.item(item, values=v)
 
-            MondayPicker(self, initial=init, callback=on_picked)
+            CalendarPicker(self, initial=init, callback=on_picked, mondays_only=True)
         else:
             bbox = self.tree.bbox(item, col)
             if not bbox:
@@ -430,6 +599,60 @@ class App(tk.Tk):
             entry.bind("<FocusOut>", save)
             entry.bind("<Escape>",   lambda e: entry.destroy())
 
+    # ── To Do controls ────────────────────────────────────────────────────────
+
+    def _make_color_swatch(self, color_hex: str) -> ImageTk.PhotoImage:
+        key = color_hex.lower()
+        if key not in self._color_photos:
+            try:
+                pil_img = Image.new("RGB", (14, 14), color_hex)
+            except Exception:
+                pil_img = Image.new("RGB", (14, 14), "#b0b0b0")
+            self._color_photos[key] = ImageTk.PhotoImage(pil_img)
+        return self._color_photos[key]
+
+    def _todo_insert(self, label, due: Date, color_hex: str):
+        display_date = due.strftime("%b %d")
+        raw_date     = due.strftime("%Y-%m-%d")
+        dl_str       = days_left_str(due)
+        photo        = self._make_color_swatch(color_hex)
+        self.todo_tree.insert("", "end", text="", image=photo,
+            values=(label, display_date, dl_str, color_hex, raw_date))
+
+    def _add_todo(self):
+        def on_done(result):
+            label, due, color = result
+            self._todo_insert(label, due, color)
+        TodoDialog(self, callback=on_done)
+
+    def _remove_todo(self):
+        for item in self.todo_tree.selection():
+            self.todo_tree.delete(item)
+
+    def _on_todo_double_click(self, event):
+        item = self.todo_tree.identify_row(event.y)
+        if not item:
+            return
+        v        = self.todo_tree.item(item, "values")
+        label    = v[0]
+        raw_date = v[4]
+        color    = v[3]
+        try:
+            due = datetime.strptime(raw_date, "%Y-%m-%d").date()
+        except ValueError:
+            due = Date.today()
+
+        def on_done(result, item=item):
+            self.todo_tree.delete(item)
+            new_label, new_due, new_color = result
+            photo = self._make_color_swatch(new_color)
+            self.todo_tree.insert("", "end", text="", image=photo,
+                values=(new_label, new_due.strftime("%b %d"),
+                        days_left_str(new_due), new_color,
+                        new_due.strftime("%Y-%m-%d")))
+
+        TodoDialog(self, initial=(label, due, color), callback=on_done)
+
     # ── Load / build config ───────────────────────────────────────────────────
 
     def _load(self):
@@ -437,6 +660,7 @@ class App(tk.Tk):
         self.title_var.set(cfg.get("title", ""))
 
         self.left_mode_var.set(cfg.get("left_pane_mode", "per_week"))
+
         for c in self.tree.get_children():
             self.tree.delete(c)
         for line in cfg.get("weeks", "").strip().split("\n"):
@@ -444,8 +668,21 @@ class App(tk.Tk):
                 parts = line.split(",", 1)
                 if len(parts) == 2:
                     self.tree.insert("", "end", values=(parts[0].strip(), parts[1].strip()))
+
         self.left_text.delete("1.0", tk.END)
         self.left_text.insert("1.0", cfg.get("left_col_content", ""))
+
+        for c in self.todo_tree.get_children():
+            self.todo_tree.delete(c)
+        for line in cfg.get("todo_items", "").strip().split("\n"):
+            if line:
+                parts = line.rsplit(",", 2)
+                if len(parts) == 3:
+                    try:
+                        due = datetime.strptime(parts[1].strip(), "%Y-%m-%d").date()
+                        self._todo_insert(parts[0].strip(), due, parts[2].strip())
+                    except ValueError:
+                        pass
 
         self.right_mode_var.set(cfg.get("right_pane_mode", "calendar"))
         self.right_text.delete("1.0", tk.END)
@@ -461,15 +698,21 @@ class App(tk.Tk):
         self._on_bottom_mode()
 
     def _build_config(self):
-        rows = [
+        week_rows = [
             f"{self.tree.item(i,'values')[0]},{self.tree.item(i,'values')[1]}"
             for i in self.tree.get_children()
         ]
+        todo_rows = []
+        for i in self.todo_tree.get_children():
+            v = self.todo_tree.item(i, "values")
+            todo_rows.append(f"{v[0]},{v[4]},{v[3]}")  # label, raw_date, color
+
         return {
             "title":             self.title_var.get().strip(),
             "left_pane_mode":    self.left_mode_var.get(),
-            "weeks":             "\n".join(rows),
+            "weeks":             "\n".join(week_rows),
             "left_col_content":  self.left_text.get("1.0", tk.END).strip(),
+            "todo_items":        "\n".join(todo_rows),
             "right_pane_mode":   self.right_mode_var.get(),
             "right_col_content": self.right_text.get("1.0", tk.END).strip(),
             "bottom_mode":       self.bottom_mode_var.get(),
@@ -489,9 +732,23 @@ class App(tk.Tk):
                         pass
         return weeks
 
+    def _parse_todo(self, cfg):
+        items = []
+        for line in cfg.get("todo_items", "").strip().split("\n"):
+            if line:
+                parts = line.rsplit(",", 2)
+                if len(parts) == 3:
+                    try:
+                        due = datetime.strptime(parts[1].strip(), "%Y-%m-%d")
+                        items.append((parts[0].strip(), due, parts[2].strip()))
+                    except ValueError:
+                        pass
+        return items
+
     def _validate_and_generate(self, set_wallpaper=False):
         cfg   = self._build_config()
         weeks = self._parse_weeks(cfg) if cfg["left_pane_mode"] == "per_week" else []
+        todo  = self._parse_todo(cfg)
 
         if not cfg["title"]:
             messagebox.showwarning("Missing", "Enter a wallpaper title.")
@@ -510,6 +767,7 @@ class App(tk.Tk):
             right_col_content = cfg["right_col_content"],
             bottom_mode       = cfg["bottom_mode"],
             bottom_content    = cfg["bottom_content"],
+            todo_items        = todo,
             set_wallpaper     = set_wallpaper,
         )
 
@@ -532,11 +790,10 @@ class App(tk.Tk):
 
         ratio   = min(cw / img.width, ch / img.height)
         preview = img.resize((int(img.width * ratio), int(img.height * ratio)), Image.LANCZOS)
-
-        photo = ImageTk.PhotoImage(preview)
+        photo   = ImageTk.PhotoImage(preview)
         self.preview_canvas.delete("all")
         self.preview_canvas.create_image(cw // 2, ch // 2, anchor="center", image=photo)
-        self.preview_canvas.image = photo   # keep reference
+        self.preview_canvas.image = photo
 
     def _save_apply(self):
         try:
